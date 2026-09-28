@@ -342,7 +342,17 @@ function saveData(data){
 let DATA = loadData();
 let deptChart, statusChart, overdueChart;
 
-function isOverdue(row){ return (row.status||'').trim() === 'متأخر'; }
+function isOverdue(row){ return effectiveStatus(row) === 'متأخر'; }
+
+// الموقف التنفيذي الفعلي: إذا تجاوزت المعاملة تاريخ الاستحقاق ولم تُنجز، تصبح "متأخر" تلقائياً
+function effectiveStatus(row){
+  const st = (row.status||'').trim();
+  if(isResolvedStatus(st)) return st;
+  const due = computeDueInfo(row);
+  if(due && due.diffDays > 0) return 'متأخر';
+  if(st === 'متأخر' && due && due.diffDays <= 0) return 'تحت الإجراء';
+  return st;
+}
 
 // --- Hijri due-date calculation (tabular/civil Islamic calendar) ---
 function parseHijri(dateStr){
@@ -417,7 +427,7 @@ function computeStats(data){
   data.forEach(r=>{
     const dc = classifyDept(r.dept);
     deptCounts[dc]++;
-    const st = (r.status||'').trim() || '(بدون حالة)';
+    const st = effectiveStatus(r) || '(بدون حالة)';
     statusCounts[st] = (statusCounts[st]||0) + 1;
     if(isOverdue(r) && overdueByDept.hasOwnProperty(dc)) overdueByDept[dc]++;
   });
@@ -427,10 +437,10 @@ function computeStats(data){
 function renderKPIs(data, stats){
   const total = data.length;
   const overdue = data.filter(isOverdue).length;
-  const issued = data.filter(r=>(r.status||'').trim().startsWith('صادر')).length;
-  const inProgress = data.filter(r=>(r.status||'').trim()==='تحت الإجراء').length;
+  const issued = data.filter(r=>effectiveStatus(r).startsWith('صادر')).length;
+  const inProgress = data.filter(r=>effectiveStatus(r)==='تحت الإجراء').length;
   const filed = data.filter(r=>{
-    const s=(r.status||'').trim();
+    const s=effectiveStatus(r);
     return s==='تم الحفظ حسب التوجيه' || s==='حفظ' || s.startsWith('حفظ');
   }).length;
 
@@ -504,7 +514,7 @@ function renderCharts(stats){
 function populateStatusFilter(){
   const sel = document.getElementById('statusFilter');
   const existing = new Set(Array.from(sel.options).map(o=>o.value));
-  const allStatuses = Array.from(new Set(DATA.map(r=>(r.status||'').trim()).filter(Boolean)));
+  const allStatuses = Array.from(new Set(DATA.map(r=>effectiveStatus(r)).filter(Boolean)));
   allStatuses.sort();
   allStatuses.forEach(s=>{
     if(!existing.has(s)){
@@ -554,7 +564,7 @@ function renderTable(){
     const dc = classifyDept(row.dept);
     if(deptF && dc !== deptF) return;
     if(yearF && String(row.year||'').trim() !== yearF) return;
-    if(statusF && (row.status||'').trim() !== statusF) return;
+    if(statusF && effectiveStatus(row) !== statusF) return;
     if(overdueOnly && !isOverdue(row)) return;
     if(search){
       const hay = `${row.subject} ${row.source} ${row.notes}`.toLowerCase();
@@ -602,7 +612,7 @@ function renderTable(){
         <select class="dept-select" data-field="dept">${deptSelectOptions(dc)}</select>
       </td>
       <td>
-        <select class="status-select" data-field="status">${statusSelectOptions((row.status||'').trim())}</select>
+        <select class="status-select" data-field="status">${statusSelectOptions(effectiveStatus(row))}</select>
         ${isOverdue(row) ? '<div class="overdue-flag">⏱ متأخرة</div>' : ''}
       </td>
       <td class="notes" contenteditable="true" data-field="notes">${escapeHtml(row.notes)}</td>
@@ -630,7 +640,8 @@ function onEdit(e){
     DATA[idx][field] = value;
   }
   saveData(DATA);
-  refreshAll(false);
+  populateStatusFilter();
+  refreshAll(true);
 }
 
 function refreshAll(rerenderTable=true){
@@ -750,7 +761,7 @@ document.getElementById('exportBtn').addEventListener('click', ()=>{
     const dueInfo = computeDueInfo(r);
     const dueDate = dueInfo ? dueInfo.dueDateStr : '';
     const overdueDays = (dueInfo && !isResolvedStatus(r.status) && dueInfo.diffDays > 0) ? dueInfo.diffDays : '';
-    aoa.push([r.n, r.uno, r.year, r.date, r.source, r.subject, r.dept, r.status, r.notes, r.duration || '', dueDate, overdueDays]);
+    aoa.push([r.n, r.uno, r.year, r.date, r.source, r.subject, r.dept, effectiveStatus(r), r.notes, r.duration || '', dueDate, overdueDays]);
   });
   const ws = XLSX.utils.aoa_to_sheet(aoa);
   ws['!cols'] = [{wch:6},{wch:16},{wch:8},{wch:14},{wch:26},{wch:45},{wch:26},{wch:20},{wch:35},{wch:14},{wch:16},{wch:14}];
@@ -764,12 +775,13 @@ refreshAll();
 
 // --- Live sync from Google Sheet: overrides local/cached data on every page load ---
 const SHEET_ID = '1Km313Hi1B6WDgjF8tPo0CYtZKm3IX8dqYnQ5dEwLKDM';
-const SHEET_CSV_URL = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:csv`;
+const SHEET_GID = '1689484926';
+const SHEET_CSV_URL = () => `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:csv&headers=1&gid=${SHEET_GID}&t=${Date.now()}`;
 
 async function syncFromGoogleSheet(){
   const statusEl = document.getElementById('lastUpdate');
   try{
-    const res = await fetch(SHEET_CSV_URL, {cache:'no-store'});
+    const res = await fetch(SHEET_CSV_URL(), {cache:'no-store'});
     if(!res.ok) throw new Error('HTTP ' + res.status);
     const text = await res.text();
     const parsed = Papa.parse(text, {skipEmptyLines:true});
@@ -782,10 +794,11 @@ async function syncFromGoogleSheet(){
       if(!r || r.length < 9) continue;
       const m = r[0];
       if(m === undefined || m === null || String(m).trim() === '') continue;
+      if(!String(r[5]||'').trim() && !String(r[1]||'').trim()) continue;
       newData.push({
         n: r[0], uno: r[1] || '', year: r[2] || '', date: r[3] || '',
         source: r[4] || '', subject: r[5] || '', dept: r[6] || '',
-        status: r[7] || '', notes: r[8] || '', duration: r[9] || '',
+        status: (r[7]||'').trim(), notes: r[8] || '', duration: String(r[9]||'').replace(/[^0-9]/g,'') || extractDurationFromNotes(r[8]||''),
       });
     }
     if(newData.length === 0) throw new Error('no rows parsed');
@@ -802,6 +815,8 @@ async function syncFromGoogleSheet(){
 }
 
 syncFromGoogleSheet();
+setInterval(syncFromGoogleSheet, 5*60*1000); // تحديث تلقائي كل 5 دقائق
+document.addEventListener('visibilitychange', ()=>{ if(!document.hidden) syncFromGoogleSheet(); });
 </script>
 </body>
 </html>

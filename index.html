@@ -266,10 +266,7 @@
       </select>
       <label class="chk"><input type="checkbox" id="overdueOnly"> المتأخرة فقط</label>
       <span class="spacer"></span>
-      <button class="btn" id="importBtn">استيراد من إكسل</button>
-      <input type="file" id="importFile" accept=".xlsx,.xls,.csv" style="display:none">
       <button class="btn ghost" id="exportBtn">تنزيل إكسل</button>
-      <button class="btn ghost" id="resetBtn">استعادة البيانات الأصلية</button>
     </div>
     <p class="count-note" id="importNote" style="display:none;"></p>
 
@@ -662,97 +659,6 @@ document.getElementById('deptFilter').addEventListener('change', renderTable);
 document.getElementById('yearFilter').addEventListener('change', renderTable);
 document.getElementById('statusFilter').addEventListener('change', renderTable);
 document.getElementById('overdueOnly').addEventListener('change', renderTable);
-
-document.getElementById('importBtn').addEventListener('click', ()=>{
-  document.getElementById('importFile').click();
-});
-
-document.getElementById('importFile').addEventListener('change', (e)=>{
-  const file = e.target.files[0];
-  if(!file) return;
-  const noteEl = document.getElementById('importNote');
-  const reader = new FileReader();
-  reader.onload = (evt)=>{
-    try{
-      const wb = XLSX.read(evt.target.result, {type:'array'});
-      const sheetName = wb.SheetNames[0];
-      const sheet = wb.Sheets[sheetName];
-      const rows = XLSX.utils.sheet_to_json(sheet, {header:1, raw:false, defval:''});
-
-      // find header row (first row containing 'الموضوع' or similar), else assume row 0
-      let startIdx = 1;
-      const headerRow = rows[0] || [];
-      const headerText = headerRow.join(' ');
-      if(!headerText.includes('الموضوع') && !headerText.includes('م')){
-        startIdx = 0; // no header, treat all as data (unlikely)
-      }
-
-      const oldByUno = new Map();
-      DATA.forEach(r=>{ if(r.uno !== '' && r.uno !== null && r.uno !== undefined) oldByUno.set(String(r.uno), r.duration || ''); });
-
-      const newData = [];
-      for(let i = startIdx; i < rows.length; i++){
-        const r = rows[i];
-        if(!r || r.length === 0) continue;
-        const mVal = (r[0]===undefined || r[0]===null || String(r[0]).trim()==='') ? null : r[0];
-        if(mVal === null) continue;
-        const unoVal = r[1] ?? '';
-        const notesVal = (r[8] ?? '').toString().trim();
-        // priority: explicit 10th column > previously-set value for this uno > auto-detected from notes text
-        let duration = (r[9] !== undefined && String(r[9]).trim() !== '') ? String(r[9]).trim() : '';
-        if(!duration && oldByUno.has(String(unoVal))) duration = oldByUno.get(String(unoVal));
-        if(!duration) duration = extractDurationFromNotes(notesVal);
-        const rec = {
-          n: r[0] ?? (newData.length+1),
-          uno: unoVal,
-          year: r[2] ?? '',
-          date: r[3] ?? '',
-          source: (r[4] ?? '').toString().trim(),
-          subject: (r[5] ?? '').toString().trim(),
-          dept: (r[6] ?? '').toString().trim(),
-          status: (r[7] ?? '').toString().trim(),
-          notes: (r[8] ?? '').toString().trim(),
-          duration: duration,
-        };
-        // skip fully-blank placeholder rows (numbered but with no real transaction content)
-        const hasContent = [rec.uno, rec.date, rec.source, rec.subject, rec.dept, rec.status, rec.notes]
-          .some(v => v !== '' && v !== null && v !== undefined);
-        if(!hasContent) continue;
-        newData.push(rec);
-      }
-
-      if(newData.length === 0){
-        noteEl.style.display = 'block';
-        noteEl.style.color = 'var(--brick)';
-        noteEl.textContent = 'ما قدرت ألقى صفوف بيانات بهذا الملف. تأكد إن ترتيب الأعمدة مطابق للأصل: م، الرقم الموحد، السنة، التاريخ، جهة الوارد، الموضوع، محالة إلى، الموقف التنفيذي، ملاحظات.';
-        return;
-      }
-
-      DATA = newData;
-      saveData(DATA);
-      populateStatusFilter();
-      refreshAll();
-      noteEl.style.display = 'block';
-      noteEl.style.color = 'var(--parks)';
-      noteEl.textContent = `تم استيراد ${newData.length} صف بنجاح من الملف.`;
-    }catch(err){
-      console.error(err);
-      noteEl.style.display = 'block';
-      noteEl.style.color = 'var(--brick)';
-      noteEl.textContent = 'حصل خطأ أثناء قراءة الملف. تأكد إنه ملف إكسل أو CSV صحيح.';
-    }
-    e.target.value = '';
-  };
-  reader.readAsArrayBuffer(file);
-});
-
-document.getElementById('resetBtn').addEventListener('click', ()=>{
-  if(!confirm('هل تريد استعادة البيانات الأصلية والتراجع عن كل التعديلات المحفوظة في هذا المتصفح؟')) return;
-  DATA = JSON.parse(JSON.stringify(RAW_DATA));
-  saveData(DATA);
-  populateStatusFilter();
-  refreshAll();
-});
 
 document.getElementById('exportBtn').addEventListener('click', ()=>{
   const headers = ['م','الرقم الموحد','السنة','التاريخ','جهة الوارد','الموضوع','الإدارة','الموقف التنفيذي','ملاحظات','مدة التنفيذ المحددة (أيام)','تاريخ الاستحقاق','مدة التأخير (أيام)'];

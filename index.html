@@ -341,14 +341,9 @@ let deptChart, statusChart, overdueChart;
 
 function isOverdue(row){ return effectiveStatus(row) === 'متأخر'; }
 
-// الموقف التنفيذي الفعلي: إذا تجاوزت المعاملة تاريخ الاستحقاق ولم تُنجز، تصبح "متأخر" تلقائياً
 function effectiveStatus(row){
-  const st = (row.status||'').trim();
-  if(isResolvedStatus(st)) return st;
-  const due = computeDueInfo(row);
-  if(due && due.diffDays > 0) return 'متأخر';
-  if(st === 'متأخر' && due && due.diffDays <= 0) return 'تحت الإجراء';
-  return st;
+  // الموقف كما هو مكتوب في الشيت بالضبط
+  return (row.status||'').trim();
 }
 
 // --- Hijri due-date calculation (tabular/civil Islamic calendar) ---
@@ -387,7 +382,7 @@ function formatHijri(h){ return `${h.y}-${h.m}-${h.d}هـ`; }
 function isResolvedStatus(status){
   status = (status||'').trim();
   if(!status) return false;
-  return ['صادر','حفظ','منجز','منتهي','الإنتهاء','مغلقة','محالة'].some(k=>status.includes(k));
+  return ['صادر','حفظ','منجز','منتهي','الإنتهاء','الانتهاء','مغلق','محال','إحال','احال','تم الرد','تم التفاهم','تم التنفيذ'].some(k=>status.includes(k));
 }
 
 const DURATION_WORD_MAP = {
@@ -721,7 +716,7 @@ async function syncFromGoogleSheet(){
 }
 
 syncFromGoogleSheet();
-setInterval(syncFromGoogleSheet, 5*60*1000); // تحديث تلقائي كل 5 دقائق
+setInterval(syncFromGoogleSheet, 60*1000); // تحديث تلقائي كل دقيقة
 document.addEventListener('visibilitychange', ()=>{ if(!document.hidden) syncFromGoogleSheet(); });
 </script>
 </body>
